@@ -1,0 +1,13 @@
+doctype html
+html
+  head
+    title= title
+    link(rel='stylesheet', href='/stylesheets/style.css')
+  body
+    block content
+
+    script(async = true)
+    script(src="https://hosted.paysafe.com/checkout/v2/paysafe.checkout.min.js")
+    script(src="https://unpkg.com/axios/dist/axios.min.js")
+    script
+      include ../../../GlobalConstants.js

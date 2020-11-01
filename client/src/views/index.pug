@@ -1,0 +1,342 @@
+extends layout
+
+block content
+
+  script.
+    function onSubmitClicked() {
+      console.log('on clicked')
+
+      let firstName = document.getElementById('firstName').value
+      let lastName = document.getElementById('lastName').value
+      let email = document.getElementById('email').value
+      let day = document.getElementById('day').value
+      let month = document.getElementById('month').value
+      let year = document.getElementById('year').value
+      let address = document.getElementById('address').value
+      let zipCode = document.getElementById('zipCode').value
+      let countryCode = document.getElementById('countryCode').value
+      let city = document.getElementById('city').value
+      let stateCode = document.getElementById('stateCode').value
+      let phone = document.getElementById('phone').value
+      let amount = document.getElementById('amount').value
+
+      let userInfo = {
+        firstName: firstName,
+        lastName: lastName,
+        email: email,
+        day: day,
+        month: month,
+        year: year,
+        address: address,
+        city: city,
+        stateCode: stateCode,
+        zipCode: zipCode,
+        countryCode: countryCode,
+        phone: phone,
+        amount: amount
+      }
+
+      let status = true;
+      Object.keys(userInfo).forEach(function (key) {
+        if (userInfo[key] == null || userInfo[key].length === 0) {
+          status = false
+          return
+        }
+      })
+
+      console.log('user info: ', status + ' : ' + JSON.stringify(userInfo))
+
+      if (status) {
+        performPayment(userInfo)
+      }
+    }
+
+    async function createCustomer(userInfo) {
+      let customerId = null
+      try {
+        let retCustomer = await axios.post("http://localhost:3000/customer", {
+                  merchantCustomerId: userInfo.email,
+                  firstName: userInfo.firstName,
+                  lastName: userInfo.lastName,
+                  phone: userInfo.phone,
+                  email: userInfo.email,
+                  year: userInfo.year,
+                  month: userInfo.month,
+                  day: userInfo.day
+                },
+                {
+                  headers: {
+                    "Access-Control-Allow-Origin": "*",
+                  },
+                }
+        );
+        if (retCustomer != null && retCustomer.data != null) {
+          customerId = retCustomer.data.id
+        }
+      } catch (error) {
+        console.error(error)
+      }
+      return customerId
+    }
+
+    async function checkForToken(userInfo) {
+      let singleUseCustomerToken = null;
+      try {
+        const retToken = await axios.post("http://localhost:3000/token", {
+                  merchantRefNum: GlobalConstants.merchantRefNum,
+                  customerId: userInfo.customerId,
+                },
+                {
+                  headers: {
+                    "Access-Control-Allow-Origin": "*",
+                  },
+                }
+        );
+        if (retToken != null && retToken.data != null) {
+          singleUseCustomerToken = retToken.data.singleUseCustomerToken;
+        }
+      } catch (err) {
+        console.error(err)
+      }
+      return singleUseCustomerToken;
+    }
+
+    async function getCustomer(userInfo) {
+      let customerId = null
+      try {
+        let retCustomer = await axios.get("http://localhost:3000/customer?merchantCustomerId=" + userInfo.email,
+                {
+                  headers: {
+                    "Access-Control-Allow-Origin": "*",
+                  },
+                }
+        );
+        if (retCustomer != null && retCustomer.data != null) {
+          customerId = retCustomer.data.id
+        }
+      } catch (error) {
+        console.error(error)
+      }
+      return customerId
+    }
+
+    async function performPayment(userInfo) {
+
+      // let publicKey = JSON.parse($('#paysafeApiKeys').html())
+      // console.log('json data: ', JSON.stringify(publicKey))
+
+      let customerId = await createCustomer(userInfo)
+      console.log('customer id after customer creation: ', userInfo.customerId)
+      if (customerId != null) {
+        GlobalConstants.customerId = customerId
+        GlobalConstants.merchantCustomerId = userInfo.email
+      }
+      userInfo.customerId = GlobalConstants.customerId
+
+      if ((userInfo.customerId == null || userInfo.customerId === "")
+              || (GlobalConstants.merchantCustomerId != null && GlobalConstants.merchantCustomerId !== userInfo.email)) {
+        customerId = await getCustomer(userInfo)
+        if (customerId != null) {
+          GlobalConstants.customerId = customerId
+          userInfo.customerId = GlobalConstants.customerId
+        }
+        console.log('customer id after getting customer data: ', userInfo.customerId)
+      }
+
+      let singleUseCustomerToken = await checkForToken(userInfo)
+      console.log('customer id after token generation: ', userInfo.customerId)
+      console.log('customer token after token generation: ', singleUseCustomerToken)
+      if (singleUseCustomerToken != null) {
+        userInfo.singleUseCustomerToken = singleUseCustomerToken
+      }
+
+      let options = {
+        currency: GlobalConstants.currency,
+        amount: parseFloat(userInfo.amount) * 100,
+        locale: GlobalConstants.locale,
+        simulator: "EXTERNAL",
+        imageUrl: "https://hosted.paysafe.com/checkout/resource/demo-store/images/logo.png",
+        environment: GlobalConstants.environment,
+        buttonColor: "#66cc99",
+        companyName: GlobalConstants.companyName,
+        holderName: userInfo.firstName,
+        customer: {
+          firstName: userInfo.firstName,
+          lastName: userInfo.lastName,
+          email: userInfo.email,
+          phone: userInfo.phone,
+          dateOfBirth: {
+            day: parseInt(userInfo.day),
+            month: parseInt(userInfo.month),
+            year: parseInt(userInfo.year)
+          }
+        },
+        billingAddress: {
+          nickName: userInfo.name,
+          street: userInfo.address,
+          city: userInfo.city,
+          state: userInfo.stateCode,
+          zip: userInfo.zipCode,
+          country: userInfo.countryCode,
+        },
+        merchantRefNum: GlobalConstants.merchantRefNum,  // Will be unique and must keep changing every transaction
+        canEditAmount: false,
+        merchantDescriptor: GlobalConstants.merchantDescriptor,
+        displayPaymentMethods: GlobalConstants.paymentMethods,
+        paymentMethodDetails: {
+          card: {
+            //accountId: "1009688230"
+          }
+        }
+      }
+
+      if (userInfo.singleUseCustomerToken != null && userInfo.singleUseCustomerToken !== "") {
+        options.singleUseCustomerToken = userInfo.singleUseCustomerToken
+      }
+
+      // using paysafe base64 encoded public key
+      window.paysafe.checkout.setup("cHVibGljLTc3NTE6Qi1xYTItMC01ZjAzMWNiZS0wLTMwMmQwMjE1MDA4OTBlZjI2MjI5NjU2M2FjY2QxY2I0YWFiNzkwMzIzZDJmZDU3MGQzMDIxNDUxMGJjZGFjZGFhNGYwM2Y1OTQ3N2VlZjEzZjJhZjVhZDEzZTMwNDQ=",
+              options,
+      async function (instance, error, result) {
+        if (error) {
+          alert(error)
+        }
+
+        if (result != null && result.paymentHandleToken) {
+
+          console.log('print', JSON.stringify(result))
+
+          let ret = null
+          let apiNum = 0;
+
+          try {
+            if (result.customerOperation != null && result.customerOperation === 'ADD') {
+
+              apiNum = 1;
+
+              ret = await axios.post("http://localhost:3000/payments", {
+                merchantRefNum: GlobalConstants.merchantRefNum,
+                paymentHandleToken: result.paymentHandleToken,
+                amount: result.amount,
+                currencyCode: GlobalConstants.currency,
+                customerId: userInfo.customerId
+              })
+
+            } else {
+
+              apiNum = 2;
+
+              ret = await axios.post("http://localhost:3000/payments", {
+                merchantRefNum: GlobalConstants.merchantRefNum,
+                paymentHandleToken: result.paymentHandleToken,
+                amount: result.amount,
+                currencyCode: GlobalConstants.currency
+              })
+
+            }
+
+            console.log("payment response:" + apiNum + " : ", ret)
+
+          } catch (err) {
+            console.error(err)
+          }
+
+          if (ret != null && ret.data != null && ret.data.status === 'COMPLETED') {
+            instance.showSuccessScreen("Your goods are now purchased. Expect them to be delivered in next 5 business days.");
+          } else {
+            instance.showFailureScreen("Some error occurred in payment. Please, try again with the same or another payment method.");
+          }
+
+        } else {
+          instance.showFailureScreen("The payment was declined. Please, try again with the same or another payment method.");
+        }
+
+      }, function (stage, expired) {
+
+        // alert("Payment Handle Stage :: " + stage);
+        switch (stage) {
+          case "PAYMENT_HANDLE_NOT_CREATED":
+          case "PAYMENT_HANDLE_CREATED":
+          case "PAYMENT_HANDLE_REDIRECT":
+          case "PAYMENT_HANDLE_PAYABLE":
+          default:
+        }
+
+      });
+    }
+
+  style.
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .App {
+      text-align: Center;
+    }
+    .labe {
+      font-size: 18px;
+    
+    }
+    .input {
+      padding: 5px;
+      size: 18px;
+    }
+    .form1{
+      background-Color: lightGreen;
+      
+    }
+    .button1{
+      font-size: 20px;
+    }
+
+
+
+  div(class="App")
+    h1= title
+    form(class="form1")
+      div(class="input")
+        label(class="labe") First Name : 
+        input(id='firstName' Placeholder='Enter First Name')
+      div(class="input")
+        label(class="labe") Last Name:  
+        input(id='lastName' Placeholder='Enter Last Name')
+      div(class="input")
+        label(class="labe") Email : 
+        input(id='email' Placeholder='Enter Email ID')
+      div(class="input")
+        label(class="labe") Phone : 
+        input(id='phone' Placeholder='Enter Phone Number')
+      div(class="input")
+        label(class="labe") Day : 
+        input(id='day' Placeholder='Enter DOB Date')
+      div(class="input")
+        label(class="labe") Month: 
+        input(id='month' Placeholder='Enter DOB Month')
+      div(class="input")
+        label(class="labe") Year : 
+        input(id='year' Placeholder='Enter DOB Year')
+      div(class="input")
+        label(class="labe") Address: 
+        input(id='address' Placeholder='Enter Address')
+      div(class="input")
+        label(class="labe") City : 
+        input(id='city' Placeholder='Enter City')
+      div(class="input")
+        label(class="labe") State Code :
+        input(id='stateCode' Placeholder='Enter State Code Ex : CA')
+      div(class="input")
+        label(class="labe") Zip Code : 
+        input(id='zipCode' Placeholder='Enter ZIP Code ')
+      div(class="input")
+        label(class="labe") Country Code : 
+        input(id='countryCode' Placeholder='Enter Country Code Ex: US')
+      div(class="input")
+        label(class="labe") Amount to Pay: 
+        input(id='amount' )
+    br
+    button(id='submit' class="button1" onclick='onSubmitClicked()') Continue To Payment
